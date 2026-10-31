@@ -1,7 +1,6 @@
 <div align="center">
 
   <img src="./public/assets/DevSecOps.png" alt="DevSecOps Project Banner" width="100%">
-
   <h1>Netflix DevSecOps Project on Microsoft Azure</h1>
 
   <p>Containerisation | Cloud Security | Vulnerability Management | DevSecOps</p>
