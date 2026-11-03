@@ -1,0 +1,114 @@
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  ACR_NAME: kelvinnetflixacr2026
+  ACR_LOGIN_SERVER: kelvinnetflixacr2026.azurecr.io
+  IMAGE_NAME: netflix
+
+jobs:
+  build-and-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+
+      - run: yarn install --frozen-lockfile
+      - run: yarn build
+      - run: docker build -f Dockerfile.secure -t netflix:ci .
+
+      - name: Trivy security scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: netflix:ci
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          format: table
+
+  deploy:
+    needs: build-and-scan
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Managed Identity login
+        run: az login --identity
+
+      - name: ACR login
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Build and push image
+        run: |
+          IMAGE_TAG="$GITHUB_SHA"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+          docker build -f Dockerfile.secure \
+            -t "$ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG" .
+          docker push "$ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG"
+
+      - name: Test candidate
+        run: |
+          docker rm -f netflix-candidate 2>/dev/null || true
+          docker run -d --name netflix-candidate \
+            -p 8084:80 \
+            "$ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG"
+
+          for i in $(seq 1 15); do
+            if curl -fsS http://localhost:8084 >/dev/null; then
+              echo "Candidate health check passed"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          docker logs netflix-candidate
+          docker rm -f netflix-candidate
+          exit 1
+
+      - name: Deploy with rollback
+        run: |
+          set -e
+          OLD_IMAGE=$(docker inspect --format='{{.Config.Image}}' netflix-production)
+
+          docker stop netflix-production
+          docker rm netflix-production
+
+          docker run -d \
+            --name netflix-production \
+            --restart unless-stopped \
+            -p 8082:80 \
+            "$ACR_LOGIN_SERVER/$IMAGE_NAME:$IMAGE_TAG"
+
+          for i in $(seq 1 15); do
+            if curl -fsS http://localhost:8082 >/dev/null; then
+              echo "Production deployment successful"
+              docker rm -f netflix-candidate
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Health check failed. Rolling back."
+          docker logs netflix-production || true
+          docker rm -f netflix-production || true
+
+          docker run -d \
+            --name netflix-production \
+            --restart unless-stopped \
+            -p 8082:80 \
+            "$OLD_IMAGE"
+
+          exit 1
