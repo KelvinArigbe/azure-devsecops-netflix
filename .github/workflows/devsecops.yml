@@ -30,7 +30,7 @@ jobs:
       - run: docker build -f Dockerfile.secure -t netflix:ci .
 
       - name: Trivy security scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.29.0
         with:
           image-ref: netflix:ci
           severity: HIGH,CRITICAL
