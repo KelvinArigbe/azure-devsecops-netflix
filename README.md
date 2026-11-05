@@ -1,3 +1,5 @@
+![GitHub Actions](https://github.com/KelvinArigbe/azure-devsecops-netflix/actions/workflows/devsecops.yml/badge.svg?branch=main)
+
 <div align="center">
 
   <img src="./public/Azure-DevSecOps-Architecture.png" alt="Azure DevSecOps Project Architecture" width="100%">
